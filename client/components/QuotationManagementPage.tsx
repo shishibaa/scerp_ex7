@@ -19,23 +19,51 @@ const emptyForm = {
   status: "",
 };
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
+
 export default function QuotationManagementPage() {
   const [quotations, setQuotations] = useState<Quotation[]>([]);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [isOpen, setIsOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
+  // ================= LOAD DATA =================
   useEffect(() => {
-    fetch("http://localhost:3000/quotations")
-      .then(res => res.json())
-      .then(data => setQuotations(data));
+    const loadData = async () => {
+      try {
+        const res = await fetch(`${API_URL}/quotations`);
+        if (!res.ok) throw new Error("Failed to fetch quotations");
+        const data = await res.json();
+        setQuotations(data);
+      } catch (err) {
+        alert("Error loading quotations");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
   }, []);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
+  // ================= FORM =================
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+  ) => {
+    const { name, value } = e.target;
+    setForm(prev => ({ ...prev, [name]: value }));
   };
 
-// Modal
+  const validateForm = () => {
+    if (!form.customerName.trim()) return "Customer name is required";
+    if (!form.title.trim()) return "Title is required";
+    if (!form.dueDate) return "Due date is required";
+    if (!form.type) return "Type is required";
+    if (!form.status) return "Status is required";
+    return null;
+  };
+
   const openAddModal = () => {
     setForm(emptyForm);
     setEditingId(null);
@@ -49,38 +77,72 @@ export default function QuotationManagementPage() {
   };
 
   const handleSubmit = async () => {
-    if (editingId === null) {
-      const res = await fetch("http://localhost:3000/quotations", {
-        method: "POST",
+    const error = validateForm();
+    if (error) {
+      alert(error);
+      return;
+    }
+
+    setSaving(true);
+
+    try {
+      const url =
+        editingId === null
+          ? `${API_URL}/quotations`
+          : `${API_URL}/quotations/${editingId}`;
+
+      const method = editingId === null ? "POST" : "PUT";
+
+      const res = await fetch(url, {
+        method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
-      const newQ = await res.json();
-      setQuotations([...quotations, newQ]);
-    } else {
-      const res = await fetch(
-        `http://localhost:3000/quotations/${editingId}`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(form),
-        }
-      );
-      const updated = await res.json();
-      setQuotations(
-        quotations.map(q => (q.id === editingId ? updated : q))
-      );
-    }
 
-    setIsOpen(false);
+      if (!res.ok) throw new Error("Server error");
+
+      const data = await res.json();
+
+      if (editingId === null) {
+        setQuotations(prev => [...prev, data]);
+      } else {
+        setQuotations(prev =>
+          prev.map(q => (q.id === editingId ? data : q))
+        );
+      }
+
+      setIsOpen(false);
+    } catch (err) {
+      alert("Failed to save quotation");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const deleteQuotation = async (id: number) => {
-    await fetch(`http://localhost:3000/quotations/${id}`, {
-      method: "DELETE",
-    });
-    setQuotations(quotations.filter(q => q.id !== id));
+    if (!confirm("Delete this quotation?")) return;
+
+    try {
+      const res = await fetch(`${API_URL}/quotations/${id}`, {
+        method: "DELETE",
+      });
+
+      if (!res.ok) throw new Error("Delete failed");
+
+      setQuotations(prev => prev.filter(q => q.id !== id));
+    } catch {
+      alert("Failed to delete quotation");
+    }
   };
+
+  // ================= UI =================
+  if (loading) {
+    return (
+      <div className="p-10 text-center text-lg font-medium">
+        Loading quotations...
+      </div>
+    );
+  }
 
   return (
     <div className="p-8 max-w-6xl mx-auto">
@@ -88,7 +150,7 @@ export default function QuotationManagementPage() {
         <h1 className="text-2xl font-bold">Quotation Management</h1>
         <button
           onClick={openAddModal}
-          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 cursor-pointer"
         >
           + Add Quotation
         </button>
@@ -100,10 +162,10 @@ export default function QuotationManagementPage() {
             <tr>
               <th className="p-3 text-left">Customer</th>
               <th className="p-3 text-left">Title</th>
-              <th className="p-3">Due Date</th>
-              <th className="p-3">Type</th>
-              <th className="p-3">Status</th>
-              <th className="p-3">Action</th>
+              <th className="p-3 text-center">Due Date</th>
+              <th className="p-3 text-center">Type</th>
+              <th className="p-3 text-center">Status</th>
+              <th className="p-3 text-center">Action</th>
             </tr>
           </thead>
           <tbody>
@@ -117,13 +179,13 @@ export default function QuotationManagementPage() {
                 <td className="p-3 text-center space-x-2">
                   <button
                     onClick={() => openEditModal(q)}
-                    className="px-3 py-1 bg-yellow-400 rounded"
+                    className="px-3 py-1 bg-yellow-400 rounded cursor-pointer"
                   >
                     Edit
                   </button>
                   <button
                     onClick={() => deleteQuotation(q.id)}
-                    className="px-3 py-1 bg-red-500 text-white rounded"
+                    className="px-3 py-1 bg-red-500 text-white rounded cursor-pointer"
                   >
                     Delete
                   </button>
@@ -142,37 +204,66 @@ export default function QuotationManagementPage() {
               {editingId ? "Edit Quotation" : "Add Quotation"}
             </h2>
 
-            {["customerName", "title", "type", "status"].map(field => (
-              <input
-                key={field}
-                name={field}
-                placeholder={field}
-                value={(form as any)[field]}
-                onChange={handleChange}
-                className="w-full border p-2 mb-3 rounded"
-              />
-            ))}
+            <input
+              name="customerName"
+              placeholder="Customer Name"
+              value={form.customerName}
+              onChange={handleChange}
+              className="w-full border p-2 mb-3 rounded"
+            />
+
+            <input
+              name="title"
+              placeholder="Title"
+              value={form.title}
+              onChange={handleChange}
+              className="w-full border p-2 mb-3 rounded"
+            />
 
             <input
               type="date"
               name="dueDate"
               value={form.dueDate}
               onChange={handleChange}
-              className="w-full border p-2 mb-4 rounded"
+              className="w-full border p-2 mb-3 rounded"
             />
+
+            <select
+              name="type"
+              value={form.type}
+              onChange={handleChange}
+              className="w-full border p-2 mb-3 rounded"
+            >
+              <option value="">Select Type</option>
+              <option value="Standard">Standard</option>
+              <option value="Custom">Custom</option>
+            </select>
+
+            <select
+              name="status"
+              value={form.status}
+              onChange={handleChange}
+              className="w-full border p-2 mb-4 rounded"
+            >
+              <option value="">Select Status</option>
+              <option value="Pending">Pending</option>
+              <option value="In Progress">In Progress</option>
+              <option value="Completed">Completed</option>
+            </select>
 
             <div className="flex justify-end space-x-2">
               <button
                 onClick={() => setIsOpen(false)}
-                className="px-4 py-2 border rounded"
+                className="px-4 py-2 border rounded cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSubmit}
-                className="px-4 py-2 bg-blue-600 text-white rounded"
+                disabled={saving}
+                className="px-4 py-2 bg-blue-600 text-white rounded cursor-pointer disabled:opacity-50"
               >
-                {editingId ? "Update" : "Add"}
+                {saving ? "Saving..." : editingId ? "Update" : "Add"}
               </button>
             </div>
           </div>
