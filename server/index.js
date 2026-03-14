@@ -1,3 +1,8 @@
+require("dotenv").config()
+
+const jwt = require("jsonwebtoken")
+const bcrypt = require("bcrypt")
+
 const express = require("express");
 const cors = require("cors");
 const sqlite3 = require("sqlite3").verbose();
@@ -31,6 +36,15 @@ async function initDB() {
     );
   `);
 
+  await db.exec(`
+  CREATE TABLE users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    username TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL
+  );
+`)
+
   // seed 5 default records
   const seed = [
     ["John Doe","Request Product A","2024-07-15","Standard","Pending"],
@@ -48,9 +62,18 @@ async function initDB() {
       row
     );
   }
+  
+  const hash = await bcrypt.hash("1234", 10)
+
+  await db.run(
+    `INSERT INTO users (name, username, password)
+    VALUES (?,?,?)`,
+    ["Admin", "admin", hash]
+  )
 
   console.log("✅ SQLite initialized");
 }
+
 
 /* =========================
    VALIDATION
@@ -91,15 +114,92 @@ function validateQuotationBody(req, res, next) {
 /* =========================
    ROUTES
 ========================= */
+app.post("/register", async (req, res) => {
+  const { name, username, password } = req.body
 
+  if (!name || !username || !password) {
+    return res.status(400).json({ message: "All fields required" })
+  }
+
+  const existing = await db.get(
+    "SELECT * FROM users WHERE username=?",
+    [username]
+  )
+
+  if (existing) {
+    return res.status(400).json({ message: "Username already exists" })
+  }
+
+  const hash = await bcrypt.hash(password, 10)
+
+  await db.run(
+    "INSERT INTO users (name, username, password) VALUES (?,?,?)",
+    [name, username, hash]
+  )
+
+  res.json({ message: "Register success" })
+})
+
+app.post("/login", async (req, res) => {
+  const { username, password } = req.body
+
+  if (!username || !password) {
+    return res.status(400).json({ message: "Missing fields" })
+  }
+
+  const user = await db.get(
+    "SELECT * FROM users WHERE username=?",
+    [username]
+  )
+
+  if (!user) {
+    return res.status(401).json({ message: "User not found" })
+  }
+
+  const match = await bcrypt.compare(password, user.password)
+
+  if (!match) {
+    return res.status(401).json({ message: "Wrong password" })
+  }
+
+  const token = jwt.sign(
+    { username: user.username },
+    process.env.JWT_SECRET,
+    { expiresIn: "1h" }
+  )
+
+  res.json({ token })
+})
+
+// middleware 
+function authMiddleware(req, res, next) {
+  const header = req.headers.authorization
+
+  if (!header) {
+    return res.status(401).json({ message: "No token" })
+  }
+
+  const token = header.split(" ")[1]
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET)
+    req.user = decoded
+    next()
+  } catch {
+    res.status(401).json({ message: "Invalid token" })
+  }
+}
+
+
+// Quotation routes
 // GET ALL
-app.get("/quotations", async (req, res) => {
+app.get("/quotations", authMiddleware, async (req, res) => {
   const rows = await db.all("SELECT * FROM quotation_requests");
   res.json(rows);
 });
 
 // GET BY ID
-app.get("/quotations/:id", validateIdParam, async (req, res) => {
+app.get("/quotations/:id",authMiddleware, validateIdParam, async (req, res) => {
   const row = await db.get(
     "SELECT * FROM quotation_requests WHERE id = ?",
     [req.id]
@@ -113,7 +213,7 @@ app.get("/quotations/:id", validateIdParam, async (req, res) => {
 });
 
 // CREATE
-app.post("/quotations", validateQuotationBody, async (req, res) => {
+app.post("/quotations",authMiddleware, validateQuotationBody, async (req, res) => {
   const { customerName, title, dueDate, type, status } = req.body;
 
   const result = await db.run(
@@ -133,7 +233,7 @@ app.post("/quotations", validateQuotationBody, async (req, res) => {
 
 // UPDATE
 app.put(
-  "/quotations/:id",
+  "/quotations/:id",authMiddleware,
   validateIdParam,
   validateQuotationBody,
   async (req, res) => {
@@ -160,7 +260,7 @@ app.put(
 );
 
 // DELETE
-app.delete("/quotations/:id", validateIdParam, async (req, res) => {
+app.delete("/quotations/:id", authMiddleware,validateIdParam, async (req, res) => {
   const result = await db.run(
     "DELETE FROM quotation_requests WHERE id=?",
     [req.id]

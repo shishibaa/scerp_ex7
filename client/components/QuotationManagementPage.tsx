@@ -28,16 +28,50 @@ export default function QuotationManagementPage() {
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [username, setUsername] = useState<string>("");
+
+  // ⭐ decode username from JWT
+  const getUsernameFromToken = (token: string) => {
+    try {
+      const payload = JSON.parse(atob(token.split(".")[1]));
+      return payload.username || "";
+    } catch {
+      return "";
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("token");
+    window.location.href = "/login";
+  };
 
   // ================= LOAD DATA =================
   useEffect(() => {
     const loadData = async () => {
       try {
-        const res = await fetch(`${API_URL}/quotations`);
-        if (!res.ok) throw new Error("Failed to fetch quotations");
+        const token = localStorage.getItem("token");
+
+        if (!token) {
+          window.location.href = "/login";
+          return;
+        }
+
+        setUsername(getUsernameFromToken(token));
+
+        const res = await fetch(`${API_URL}/quotations`, {
+          headers: {
+            Authorization: "Bearer " + token,
+          },
+        });
+
+        if (res.status === 401) {
+          window.location.href = "/login";
+          return;
+        }
+
         const data = await res.json();
         setQuotations(data);
-      } catch (err) {
+      } catch {
         alert("Error loading quotations");
       } finally {
         setLoading(false);
@@ -86,6 +120,8 @@ export default function QuotationManagementPage() {
     setSaving(true);
 
     try {
+      const token = localStorage.getItem("token");
+
       const url =
         editingId === null
           ? `${API_URL}/quotations`
@@ -95,11 +131,17 @@ export default function QuotationManagementPage() {
 
       const res = await fetch(url, {
         method,
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer " + token,
+        },
         body: JSON.stringify(form),
       });
 
-      if (!res.ok) throw new Error("Server error");
+      if (res.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
 
       const data = await res.json();
 
@@ -112,7 +154,7 @@ export default function QuotationManagementPage() {
       }
 
       setIsOpen(false);
-    } catch (err) {
+    } catch {
       alert("Failed to save quotation");
     } finally {
       setSaving(false);
@@ -123,11 +165,19 @@ export default function QuotationManagementPage() {
     if (!confirm("Delete this quotation?")) return;
 
     try {
+      const token = localStorage.getItem("token");
+
       const res = await fetch(`${API_URL}/quotations/${id}`, {
         method: "DELETE",
+        headers: {
+          Authorization: "Bearer " + token,
+        },
       });
 
-      if (!res.ok) throw new Error("Delete failed");
+      if (res.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
 
       setQuotations(prev => prev.filter(q => q.id !== id));
     } catch {
@@ -147,13 +197,26 @@ export default function QuotationManagementPage() {
   return (
     <div className="p-8 max-w-6xl mx-auto">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Quotation Management</h1>
-        <button
-          onClick={openAddModal}
-          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 cursor-pointer"
-        >
-          + Add Quotation
-        </button>
+        <div>
+          <h1 className="text-2xl font-bold">Quotation Management</h1>
+          <p className="text-sm text-gray-500">Logged in as: {username}</p>
+        </div>
+
+        <div className="flex gap-2">
+          <button
+            onClick={handleLogout}
+            className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
+          >
+            Logout
+          </button>
+
+          <button
+            onClick={openAddModal}
+            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+          >
+            + Add Quotation
+          </button>
+        </div>
       </div>
 
       <div className="overflow-x-auto bg-white shadow rounded">
@@ -179,13 +242,13 @@ export default function QuotationManagementPage() {
                 <td className="p-3 text-center space-x-2">
                   <button
                     onClick={() => openEditModal(q)}
-                    className="px-3 py-1 bg-yellow-400 rounded cursor-pointer"
+                    className="px-3 py-1 bg-yellow-400 rounded"
                   >
                     Edit
                   </button>
                   <button
                     onClick={() => deleteQuotation(q.id)}
-                    className="px-3 py-1 bg-red-500 text-white rounded cursor-pointer"
+                    className="px-3 py-1 bg-red-500 text-white rounded"
                   >
                     Delete
                   </button>
@@ -196,7 +259,6 @@ export default function QuotationManagementPage() {
         </table>
       </div>
 
-      {/* MODAL */}
       {isOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center">
           <div className="bg-white w-full max-w-md p-6 rounded shadow">
@@ -254,14 +316,14 @@ export default function QuotationManagementPage() {
             <div className="flex justify-end space-x-2">
               <button
                 onClick={() => setIsOpen(false)}
-                className="px-4 py-2 border rounded cursor-pointer"
+                className="px-4 py-2 border rounded"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSubmit}
                 disabled={saving}
-                className="px-4 py-2 bg-blue-600 text-white rounded cursor-pointer disabled:opacity-50"
+                className="px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-50"
               >
                 {saving ? "Saving..." : editingId ? "Update" : "Add"}
               </button>

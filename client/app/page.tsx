@@ -1,5 +1,20 @@
-import QuotationManagementPage from "@/components/QuotationManagementPage";
+"use client";
 
-export default function QuotationsPage() {
-  return <QuotationManagementPage />;
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+
+export default function Home() {
+  const router = useRouter();
+
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+
+    if (token) {
+      router.replace("/quotations");
+    } else {
+      router.replace("/login");
+    }
+  }, [router]);
+
+  return null;
 }
